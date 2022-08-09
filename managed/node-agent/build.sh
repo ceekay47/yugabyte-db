@@ -18,8 +18,8 @@ pushd "$base_dir"
 readonly project_dir=$(pwd)
 popd
 
-readonly GOPATH=$project_dir/third-party
-readonly GOBIN=$GOPATH/$go_dir/go/bin
+export GOPATH=$project_dir/third-party
+export GOBIN=$GOPATH/$go_dir/go/bin
 readonly PROTOCBIN=$GOPATH/$protoc_dir/bin
 PATH=$GOBIN:$PROTOCBIN:$PATH
 export PATH
