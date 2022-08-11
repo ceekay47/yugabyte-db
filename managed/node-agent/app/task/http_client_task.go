@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	mountPoint    = "mount_point"
+	mountPoints   = "mount_points"
 	portAvailable = "ports"
 )
 
@@ -385,17 +385,22 @@ func getNodeConfig(data map[string]model.PreflightCheckVal) []model.NodeConfig {
 	result := make([]model.NodeConfig, 0)
 	for k, v := range data {
 		if v.Error == "none" {
-			k_split := strings.Split(k, ":")
-			if len(k_split) == 0 {
-				result = append(result, model.NodeConfig{Type: strings.ToUpper(k), Value: v.Value})
-			} else {
-				switch k_split[0] {
-				case mountPoint:
-					mountPointsMap[k_split[1]] = v.Value
-				case portAvailable:
-					portsMap[k_split[1]] = v.Value
-				default:
-					result = append(result, model.NodeConfig{Type: strings.ToUpper(k_split[0]), Value: v.Value})
+			kSplit := strings.Split(k, ":")
+			switch kSplit[0] {
+			case mountPoints:
+				mountPointsMap[kSplit[1]] = v.Value
+			case portAvailable:
+				portsMap[kSplit[1]] = v.Value
+			default:
+				//Try Getting Python Version
+				vSplit := strings.Split(v.Value, " ")
+				if len(vSplit) > 0 && strings.EqualFold(vSplit[0], "Python") {
+					result = append(
+						result,
+						model.NodeConfig{Type: strings.ToUpper(kSplit[0]), Value: vSplit[1]},
+					)
+				} else {
+					result = append(result, model.NodeConfig{Type: strings.ToUpper(kSplit[0]), Value: v.Value})
 				}
 			}
 		}
@@ -409,7 +414,7 @@ func getNodeConfig(data map[string]model.PreflightCheckVal) []model.NodeConfig {
 		}
 		result = append(
 			result,
-			model.NodeConfig{Type: strings.ToUpper(mountPoint), Value: string(mountPointsJson)},
+			model.NodeConfig{Type: strings.ToUpper(mountPoints), Value: string(mountPointsJson)},
 		)
 	}
 
@@ -425,5 +430,6 @@ func getNodeConfig(data map[string]model.PreflightCheckVal) []model.NodeConfig {
 		)
 	}
 
+	fmt.Println(result)
 	return result
 }

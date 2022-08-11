@@ -10,16 +10,13 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
+import static play.mvc.Http.Status.BAD_REQUEST;
 import static play.test.Helpers.contentAsString;
 
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.typesafe.config.Config;
-import com.yugabyte.yw.common.ConfigHelper;
-import com.yugabyte.yw.common.FakeApiHelper;
-import com.yugabyte.yw.common.FakeDBApplication;
-import com.yugabyte.yw.common.ModelFactory;
-import com.yugabyte.yw.common.PlatformScheduler;
-import com.yugabyte.yw.common.PlatformServiceException;
+import com.yugabyte.yw.common.*;
 import com.yugabyte.yw.controllers.handlers.NodeAgentHandler;
 import com.yugabyte.yw.forms.NodeAgentForm;
 import com.yugabyte.yw.forms.NodeInstanceFormData;
@@ -32,6 +29,8 @@ import com.yugabyte.yw.models.Provider;
 import com.yugabyte.yw.models.Region;
 import com.yugabyte.yw.models.Users;
 import com.yugabyte.yw.models.helpers.NodeConfiguration;
+
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,6 +40,7 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.internal.util.collections.Sets;
 import org.mockito.junit.MockitoJUnitRunner;
+import play.Application;
 import play.libs.Json;
 import play.mvc.Result;
 
@@ -49,12 +49,35 @@ public class NodeAgentControllerTest extends FakeDBApplication {
   @Mock private Config mockAppConfig;
   @Mock private ConfigHelper mockConfigHelper;
   @Mock private PlatformScheduler mockPlatformScheduler;
+
   private NodeAgentHandler nodeAgentHandler;
   private Customer customer;
   private Provider provider;
   private Region region;
   private AvailabilityZone zone;
   private Users user;
+
+  @Override
+  protected Application provideApplication() {
+    // Setup the config for node configurations
+    String nodeAgentConfig = "yb.node_agent.preflight_checks.";
+    Map<String, Object> dummyConfigMap = Maps.newHashMap();
+    dummyConfigMap.put(nodeAgentConfig + "internet_connection", "true");
+    dummyConfigMap.put(nodeAgentConfig + "python_version", "2.7");
+    dummyConfigMap.put(nodeAgentConfig + "ram_size", "2");
+    dummyConfigMap.put(nodeAgentConfig + "prometheus_no_node_exporter", "true");
+    dummyConfigMap.put(nodeAgentConfig + "ports", "true");
+    dummyConfigMap.put(nodeAgentConfig + "ntp_service_status", "true");
+    dummyConfigMap.put(nodeAgentConfig + "tmp_dir_space", "100");
+    dummyConfigMap.put(nodeAgentConfig + "cpu_cores", "1");
+    dummyConfigMap.put(nodeAgentConfig + "user", "fakeUser");
+    dummyConfigMap.put(nodeAgentConfig + "user_group", "fakeGroup");
+    dummyConfigMap.put(nodeAgentConfig + "prometheus_space", "100");
+    dummyConfigMap.put(nodeAgentConfig + "pam_limits_writable", "true");
+    dummyConfigMap.put(nodeAgentConfig + "mount_points", "true");
+    dummyConfigMap.put(nodeAgentConfig + "home_dir_space", "100");
+    return provideApplication(dummyConfigMap);
+  }
 
   @Before
   public void setup() {
@@ -146,18 +169,27 @@ public class NodeAgentControllerTest extends FakeDBApplication {
     testNode.sshUser = "ssh-user";
     // Missing node configurations in the payload.
     result = assertPlatformException(() -> createNode(zone.uuid, testNode, jwt));
-    assertBadRequest(result, "Invalid configurations");
-    NodeConfiguration nodeConfig = new NodeConfiguration();
-    testNode.nodeConfigurations = Sets.newSet(nodeConfig);
-    nodeConfig.setType(NodeConfiguration.Type.NTP_SERVICE_STATUS);
-    // Set an unaccepted value.
-    result = assertPlatformException(() -> createNode(zone.uuid, testNode, jwt));
-    // Missing preflight checks should return an error
-    assertBadRequest(result, "Invalid configurations");
+    assertEquals(result.status(), BAD_REQUEST);
     // Accepted value for NTP_SERVICE_STATUS is "running".
     testNode.nodeConfigurations = getTestNodeConfigurationsSet();
     result = createNode(zone.uuid, testNode, jwt);
     assertOk(result);
+
+    NodeConfiguration pamNode =
+        testNode
+            .nodeConfigurations
+            .stream()
+            .filter(n -> n.type == NodeConfiguration.Type.PAM_LIMITS_WRITABLE)
+            .findFirst()
+            .get();
+    NodeConfiguration errCheck =
+        new NodeConfiguration(NodeConfiguration.Type.PAM_LIMITS_WRITABLE, "false");
+    testNode.nodeConfigurations.remove(pamNode);
+    testNode.nodeConfigurations.add(errCheck);
+    // Set an unaccepted value.
+    result = assertPlatformException(() -> createNode(zone.uuid, testNode, jwt));
+    // Missing preflight checks should return an error
+    assertEquals(result.status(), BAD_REQUEST);
     result = unregisterNodeAgent(nodeAgentUuid, jwt);
     assertOk(result);
     result = assertPlatformException(() -> getNodeAgent(nodeAgentUuid, jwt));
@@ -260,9 +292,10 @@ public class NodeAgentControllerTest extends FakeDBApplication {
     NodeConfiguration nodeConfig = new NodeConfiguration();
     testNode.nodeConfigurations = Sets.newSet(nodeConfig);
     nodeConfig.setType(NodeConfiguration.Type.NTP_SERVICE_STATUS);
+    nodeConfig.setValue("true");
     // Missing preflight checks should return an error
     result = assertPlatformException(() -> createNode(zone.uuid, testNode, updatedJwt));
-    assertBadRequest(result, "Invalid configurations");
+    assertEquals(result.status(), BAD_REQUEST);
     // Accepted value for NTP_SERVICE_STATUS is "running".
     testNode.nodeConfigurations = getTestNodeConfigurationsSet();
     result = createNode(zone.uuid, testNode, updatedJwt);
@@ -275,9 +308,27 @@ public class NodeAgentControllerTest extends FakeDBApplication {
 
   public Set<NodeConfiguration> getTestNodeConfigurationsSet() {
     Set<NodeConfiguration> nodeConfigurations = Sets.newSet();
-    NodeConfiguration.TypeGroup.ALL
-        .getRequiredConfigTypes()
-        .forEach(t -> nodeConfigurations.add(new NodeConfiguration(t, "")));
+    nodeConfigurations.add(
+        new NodeConfiguration(NodeConfiguration.Type.PROMETHEUS_NO_NODE_EXPORTER, "true"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.PYTHON_VERSION, "3.0.0"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.USER, "fakeUser"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.USER_GROUP, "fakeGroup"));
+    nodeConfigurations.add(
+        new NodeConfiguration(NodeConfiguration.Type.INTERNET_CONNECTION, "true"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.TMP_DIR_SPACE, "10000"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.PROMETHEUS_SPACE, "10000"));
+    nodeConfigurations.add(
+        new NodeConfiguration(NodeConfiguration.Type.PAM_LIMITS_WRITABLE, "true"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.HOME_DIR_SPACE, "10000"));
+    nodeConfigurations.add(
+        new NodeConfiguration(NodeConfiguration.Type.PORTS, "{\"54422\":\"true\"}"));
+    nodeConfigurations.add(
+        new NodeConfiguration(
+            NodeConfiguration.Type.MOUNT_POINTS, "{\"/home/yugabyte\":\"true\"}"));
+    nodeConfigurations.add(
+        new NodeConfiguration(NodeConfiguration.Type.NTP_SERVICE_STATUS, "true"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.CPU_CORES, "1"));
+    nodeConfigurations.add(new NodeConfiguration(NodeConfiguration.Type.RAM_SIZE, "6"));
     return nodeConfigurations;
   }
 }

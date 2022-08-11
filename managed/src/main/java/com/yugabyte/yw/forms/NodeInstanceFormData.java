@@ -4,6 +4,7 @@ package com.yugabyte.yw.forms;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.collect.Sets;
+import com.typesafe.config.Config;
 import com.yugabyte.yw.models.helpers.NodeConfiguration;
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
@@ -66,14 +67,14 @@ public class NodeInstanceFormData {
      */
     @JsonIgnore
     public Set<NodeConfiguration.Type> getFailedNodeConfigurationTypes(
-        NodeConfiguration.TypeGroup typeGroup) {
+        NodeConfiguration.TypeGroup typeGroup, Config appConfig) {
       if (nodeConfigurations == null) {
         return typeGroup.getRequiredConfigTypes();
       }
       Set<NodeConfiguration.Type> configuredTypes =
           nodeConfigurations
               .stream()
-              .filter(NodeConfiguration::isConfigured)
+              .filter(n -> n.isConfigured(appConfig))
               .map(config -> config.type)
               .collect(Collectors.toSet());
       return Sets.difference(typeGroup.getRequiredConfigTypes(), configuredTypes);

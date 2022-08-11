@@ -3,6 +3,7 @@
 package com.yugabyte.yw.controllers;
 
 import com.google.inject.Inject;
+import com.typesafe.config.Config;
 import com.yugabyte.yw.commissioner.Commissioner;
 import com.yugabyte.yw.commissioner.tasks.params.DetachedNodeTaskParams;
 import com.yugabyte.yw.commissioner.tasks.params.NodeTaskParams;
@@ -59,7 +60,10 @@ import play.mvc.Results;
 public class NodeInstanceController extends AuthenticatedController {
 
   @Inject Commissioner commissioner;
+
   @Inject NodeAgentHandler nodeAgentHandler;
+
+  @Inject Config appConfig;
 
   public static final Logger LOG = LoggerFactory.getLogger(NodeInstanceController.class);
 
@@ -152,7 +156,8 @@ public class NodeInstanceController extends AuthenticatedController {
           NodeAgent nodeAgent = NodeAgent.getOrBadRequest(customerUuid, getJWTClientUuid());
           nodeAgent.ensureState(State.LIVE);
           Set<NodeConfiguration.Type> failedTypes =
-              nodeData.getFailedNodeConfigurationTypes(TypeGroup.ALL);
+              nodeData.getFailedNodeConfigurationTypes(TypeGroup.ALL, appConfig);
+          // nodeAgentHandler.getFailedNodeConfigurationTypes(nodeData, TypeGroup.ALL);
           if (CollectionUtils.isNotEmpty(failedTypes)) {
             log.error("Failed node configuration types: {}", failedTypes);
             throw new PlatformServiceException(
